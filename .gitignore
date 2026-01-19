@@ -1,0 +1,23 @@
+# Security
+.env
+*.json
+!google-services.json # Only if you specifically want to share non-secret config
+
+# Environments
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# OS/IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Large Models/Data
+*.task
+*.tflite

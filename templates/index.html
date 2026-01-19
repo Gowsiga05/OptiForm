@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptiForm AI Trainer</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: white; text-align: center; margin: 0; padding: 0; }
+        header { padding: 20px; background: #1f1f1f; border-bottom: 2px solid #00ff00; }
+        .main-container { display: flex; justify-content: center; align-items: flex-start; gap: 30px; padding: 40px; flex-wrap: wrap; }
+        
+        /* Video and Canvas Styling */
+        #container { position: relative; width: 640px; height: 480px; background: #000; border-radius: 10px; overflow: hidden; box-shadow: 0 0 20px rgba(0,255,0,0.2); }
+        #webcam { position: absolute; top: 0; left: 0; width: 640px; height: 480px; }
+        #overlay { position: absolute; top: 0; left: 0; width: 640px; height: 480px; z-index: 5; }
+        
+        /* Stats Dashboard */
+        .stats-panel { background: #1e1e1e; padding: 30px; border-radius: 15px; width: 320px; text-align: left; border: 1px solid #333; }
+        .stat-item { margin: 20px 0; font-size: 1.2rem; }
+        .highlight { color: #00ff00; font-weight: bold; font-size: 2rem; display: block; }
+        .coach-box { border-left: 4px solid #00ff00; padding-left: 15px; margin-top: 10px; font-style: italic; color: #ccc; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>OptiForm AI Trainer</h1>
+    </header>
+
+    <div class="main-container">
+        <div style="margin-bottom: 20px;">
+            <label for="exercise-type">CHOOSE EXERCISE: </label>
+            <select id="exercise-type" style="padding: 10px; background: #1f1f1f; color: #00ff00; border: 1px solid #00ff00; border-radius: 5px;">
+                <option value="bicep_curl">Bicep Curls</option>
+                <option value="squat">Squats</option>
+            </select>
+        </div>
+        <div id="container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="overlay"></canvas>
+        </div>
+
+        <div class="stats-panel">
+            <h2>Workout Dashboard</h2>
+            
+            <div class="stat-item">
+                REPS COMPLETED
+                <span id="rep-count" class="highlight">0</span>
+            </div>
+
+            <div class="stat-item">
+                COACH FEEDBACK
+                <div id="coach-feedback" class="coach-box">Waiting for exercise to start...</div>
+            </div>
+            <div class="stat-item" style="text-align: center; margin-top: 30px;">
+                <button onclick="finishWorkout()" style="
+                    background: #00ff00; 
+                    color: #121212; 
+                    border: none; 
+                    padding: 12px 24px; 
+                    font-weight: bold; 
+                    border-radius: 8px; 
+                    cursor: pointer;
+                    width: 100%;
+                    font-size: 1rem;
+                    box-shadow: 0 4px 15px rgba(0,255,0,0.3);">
+                    FINISH & SAVE WORKOUT
+                </button>
+            </div>
+        </div>
+        <div class="history-panel" style="margin: 20px auto; width: 80%; background: #1e1e1e; padding: 20px; border-radius: 15px;">
+            <h3>Recent Sessions</h3>
+            <table id="history-table" style="width: 100%; border-collapse: collapse; color: #ccc;">
+                <tr style="border-bottom: 1px solid #333;">
+                    <th style="padding: 10px;">Date</th>
+                    <th style="padding: 10px;">Total Reps</th>
+                </tr>
+                </table>
+        </div>
+        <div class="chart-container" style="margin: 20px auto; width: 80%; background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333;">
+            <h3 style="margin-top: 0;">Weekly Progress Trend</h3>
+            <canvas id="progressChart" height="100"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay');
+        const ctx = canvas.getContext('2d');
+        const repDisplay = document.getElementById('rep-count');
+        const feedbackDisplay = document.getElementById('coach-feedback');
+
+        // Initialize Camera
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 } 
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("Error accessing webcam: ", err);
+                feedbackDisplay.innerText = "Camera access denied.";
+            }
+        }
+
+        // Capture Frame and send to Flask
+        // Inside index.html <script>
+
+let isProcessing = false;
+
+async function sendFrame() {
+    if (isProcessing || video.videoWidth === 0) return;
+    isProcessing = true; // Prevent overlapping requests
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 320; // Lower resolution for faster processing
+    tempCanvas.height = 240;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(video, 0, 0, 320, 240);
+    const dataURL = tempCanvas.toDataURL('image/jpeg', 0.4); // Compress more for speed
+
+    try {
+        // Inside async function sendFrame()
+        const exerciseType = document.getElementById('exercise-type').value;
+
+        const response = await fetch('/detect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                image: dataURL,
+                exercise: exerciseType // Send this to the backend
+            })
+        });
+        const result = await response.json();
+        
+        // Update UI
+        document.getElementById('rep-count').innerText = result.reps;
+        document.getElementById('coach-feedback').innerText = result.feedback;
+        
+        // Use the angle to provide immediate visual feedback
+        drawLandmarks(result.landmarks, result.angle);
+    } catch (err) {
+        console.error(err);
+    } finally {
+        isProcessing = false;
+    }
+}
+
+// Draw skeleton with color-changing lines based on form
+function drawLandmarks(landmarks, angle) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!landmarks || landmarks.length < 3) return;
+
+    const [sh, el, wr] = landmarks;
+    
+    // Change line color based on state: Green for good, Red for needs more movement
+    ctx.strokeStyle = (angle > 155 || angle < 40) ? '#00FF00' : '#FFFF00';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(sh.x * canvas.width, sh.y * canvas.height);
+    ctx.lineTo(el.x * canvas.width, el.y * canvas.height);
+    ctx.lineTo(wr.x * canvas.width, wr.y * canvas.height);
+    ctx.stroke();
+}
+
+// Add this inside your <script> tag, below drawLandmarks()
+async function finishWorkout() {
+    if (!confirm("Are you sure you want to finish and save this session?")) return;
+
+    try {
+        const response = await fetch('/finish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+        
+        if (result.status === "success") {
+            alert("Workout Saved Successfully!");
+            updateHistoryTable(); // Refresh chart and table without page reload
+            repDisplay.innerText = "0";
+        } else {
+            alert("Error saving workout: " + result.message);
+        }
+    } catch (err) {
+        console.error("Save failed:", err);
+        alert("Failed to connect to server.");
+    }
+}
+let myChart; // Global variable to store the chart instance
+
+async function updateHistoryTable() {
+    const response = await fetch('/get_history');
+    const data = await response.json();
+    
+    // 1. Update the Table (Your existing code)
+    const table = document.getElementById('history-table');
+    while(table.rows.length > 1) table.deleteRow(1);
+    data.forEach(session => {
+        let row = table.insertRow();
+        row.innerHTML = `<td style="padding:10px;">${session.date}</td>
+                         <td style="padding:10px; color:#00ff00; font-weight:bold;">${session.reps}</td>`;
+    });
+
+    // 2. Update the Chart
+    const labels = data.map(s => s.date).reverse(); // Oldest to newest
+    const repCounts = data.map(s => s.reps).reverse();
+
+    const ctx = document.getElementById('progressChart').getContext('2d');
+    
+    if (myChart) {
+        // Update existing chart data
+        myChart.data.labels = labels;
+        myChart.data.datasets[0].data = repCounts;
+        myChart.update();
+    } else {
+        // Create a new Chart instance
+        myChart = new Chart(ctx, {
+            type: 'line', // Line chart for trends
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Reps per Session',
+                    data: repCounts,
+                    borderColor: '#00ff00',
+                    backgroundColor: 'rgba(0, 255, 0, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.3, // Smoother curves
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#ccc' } },
+                    x: { ticks: { color: '#ccc' } }
+                },
+                plugins: { legend: { labels: { color: '#fff' } } }
+            }
+        });
+    }
+}
+
+// Call this when the page loads
+updateHistoryTable();
+
+// Higher frequency for smoother feel
+setInterval(sendFrame, 100);
+        // Start workflow
+        startCamera();
+        // Lower interval (e.g., 200ms) makes it feel more "real-time" but uses more CPU
+        //setInterval(sendFrame, 200); 
+    </script>
+</body>
+</html>
